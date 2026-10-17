@@ -1,0 +1,116 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Directory name under packages/ (e.g. gnome-licensing)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ inputs.package }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Require the main branch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != 'refs/heads/main' ]; then
+            echo "::error::Publishing runs only from main, not from $REF."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the package input
+        id: package
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          if ! [[ "$PACKAGE" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "::error::Invalid package input '$PACKAGE': give a directory name under packages/ without path separators."
+            exit 1
+          fi
+          dir="packages/$PACKAGE"
+          if [ ! -f "$dir/package.json" ]; then
+            echo "::error::$dir/package.json does not exist."
+            exit 1
+          fi
+          PACKAGE_JSON="$dir/package.json" node --input-type=module <<'JS'
+            import { readFileSync, appendFileSync } from "node:fs";
+            const pkg = JSON.parse(readFileSync(process.env.PACKAGE_JSON, "utf8"));
+            if (pkg.private === true) {
+              console.log(`::error::${process.env.PACKAGE_JSON} is private and cannot be published.`);
+              process.exit(1);
+            }
+            if (!pkg.name || !pkg.version) {
+              console.log(`::error::${process.env.PACKAGE_JSON} lacks a name or a version.`);
+              process.exit(1);
+            }
+            const tag = pkg.version.includes("-") ? "next" : "latest";
+            appendFileSync(
+              process.env.GITHUB_OUTPUT,
+              `dir=packages/${process.env.PACKAGE}\nname=${pkg.name}\nversion=${pkg.version}\ntag=${tag}\n`
+            );
+            console.log(`Publishing ${pkg.name}@${pkg.version} under the dist-tag ${tag}.`);
+          JS
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.x'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@haco-studio'
+
+      - name: Refuse an already published version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ steps.package.outputs.name }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          # Keep stderr apart: npm warnings there must not read as a found version.
+          errors="$RUNNER_TEMP/npm-view.err"
+          if found=$(npm view "$NAME@$VERSION" version 2>"$errors"); then
+            if [ -n "$found" ]; then
+              echo "::error::$NAME@$VERSION is already in the registry. Bump the version before publishing."
+              exit 1
+            fi
+          elif ! grep -q 'E404' "$errors"; then
+            cat "$errors"
+            echo "::error::Could not check whether $NAME@$VERSION is already published."
+            exit 1
+          fi
+          echo "$NAME@$VERSION is not published yet."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint and format check
+        run: npm run check:strict
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIR: ${{ steps.package.outputs.dir }}
+          TAG: ${{ steps.package.outputs.tag }}
+        run: npm publish --workspace "$DIR" --tag "$TAG"
