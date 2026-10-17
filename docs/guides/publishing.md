@@ -25,4 +25,4 @@ A plain `npm install @haco-studio/<name>` resolves `latest`, so a consuming proj
 
 ## First publication
 
-A package published for the first time is private on GitHub Packages. Change its visibility to public in the package settings on GitHub before others can install it.
+After a package's first publish, check its visibility in the package settings on GitHub. A new package can start out private; others can install it only once it is public.
