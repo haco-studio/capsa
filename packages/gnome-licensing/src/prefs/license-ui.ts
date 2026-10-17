@@ -1,0 +1,213 @@
+import Adw from 'gi://Adw';
+import type Gio from 'gi://Gio';
+import Gtk from 'gi://Gtk';
+import { getLicenseStatusDisplay, LicenseKey, type LicenseState } from '../domain/index.js';
+import { HttpLicenseApiClient } from '../infra/api/index.js';
+import {
+  GioNetworkStateProvider,
+  GLibDateProvider,
+  GSettingsLicenseRepository,
+  SystemDeviceInfoProvider,
+} from '../infra/glib/index.js';
+import { LicenseOperations } from '../operations/index.js';
+
+export interface LicenseGroupOptions {
+  /**
+   * The extension's settings, whose schema declares the license keys listed
+   * in this package's README.
+   */
+  readonly settings: Gio.Settings;
+  /** Base URL of the license API, e.g. "https://license.example.com". */
+  readonly apiBaseUrl: string;
+  /**
+   * Page where a license can be purchased. When omitted, nothing offers to
+   * purchase a license.
+   */
+  readonly purchaseUrl?: string;
+}
+
+/**
+ * Create the License preferences group
+ */
+export function createLicenseGroup(
+  window: Adw.PreferencesWindow,
+  options: LicenseGroupOptions
+): Adw.PreferencesGroup {
+  const group = new Adw.PreferencesGroup({
+    title: 'License',
+  });
+
+  const repository = new GSettingsLicenseRepository(options.settings);
+  const apiClient = new HttpLicenseApiClient(options.apiBaseUrl);
+  const licenseOperations = new LicenseOperations(
+    repository,
+    apiClient,
+    new GLibDateProvider(),
+    new GioNetworkStateProvider(),
+    new SystemDeviceInfoProvider()
+  );
+
+  const { row: statusRow, update: updateStatus } = createStatusRow(
+    licenseOperations.getState(),
+    // An empty URL has nowhere to go, so it counts as no purchase page.
+    options.purchaseUrl || undefined
+  );
+  group.add(statusRow);
+
+  const { row: keyRow } = createLicenseKeyRow(licenseOperations, () =>
+    updateStatus(licenseOperations.getState())
+  );
+  group.add(keyRow);
+
+  licenseOperations.onStateChange((state: LicenseState) => {
+    updateStatus(state);
+  });
+
+  window.connect('close-request', () => {
+    licenseOperations.clearCallbacks();
+    return false;
+  });
+
+  return group;
+}
+
+interface StatusRowResult {
+  row: Adw.ActionRow;
+  update: (state: LicenseState) => void;
+}
+
+function createStatusRow(initialState: LicenseState, purchaseUrl?: string): StatusRowResult {
+  const row = new Adw.ActionRow();
+  let currentPurchaseButton: Gtk.Button | null = null;
+
+  const update = (state: LicenseState): void => {
+    const { title, subtitle, showPurchaseLink } = getLicenseStatusDisplay(state, {
+      purchaseAvailable: purchaseUrl !== undefined,
+    });
+
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+
+    // Remove existing purchase button if present
+    if (currentPurchaseButton) {
+      row.remove(currentPurchaseButton);
+      currentPurchaseButton = null;
+    }
+
+    if (showPurchaseLink && purchaseUrl !== undefined) {
+      const purchaseButton = new Gtk.Button({
+        label: 'Purchase License',
+        valign: Gtk.Align.CENTER,
+      });
+      purchaseButton.add_css_class('suggested-action');
+      purchaseButton.connect('clicked', () => {
+        Gtk.show_uri(null, purchaseUrl, 0);
+      });
+      row.add_suffix(purchaseButton);
+      currentPurchaseButton = purchaseButton;
+    }
+  };
+
+  update(initialState);
+  return { row, update };
+}
+
+interface LicenseKeyRowResult {
+  row: Adw.EntryRow;
+  activateButton: Gtk.Button;
+}
+
+function createLicenseKeyRow(
+  licenseOperations: LicenseOperations,
+  onUpdate: () => void
+): LicenseKeyRowResult {
+  const row = new Adw.EntryRow({
+    title: 'License Key',
+  });
+
+  const spinner = new Gtk.Spinner({
+    valign: Gtk.Align.CENTER,
+  });
+
+  const activateButton = new Gtk.Button({
+    label: 'Activate',
+    valign: Gtk.Align.CENTER,
+  });
+  activateButton.add_css_class('suggested-action');
+
+  const buttonBox = new Gtk.Box({
+    spacing: 6,
+    valign: Gtk.Align.CENTER,
+  });
+  buttonBox.append(spinner);
+  buttonBox.append(activateButton);
+
+  row.add_suffix(buttonBox);
+
+  const setLoading = (loading: boolean) => {
+    spinner.set_visible(loading);
+    if (loading) {
+      spinner.start();
+    } else {
+      spinner.stop();
+    }
+    activateButton.set_sensitive(!loading);
+    row.set_sensitive(!loading);
+  };
+
+  const showMessage = (message: string, isError: boolean) => {
+    if (isError) {
+      row.add_css_class('error');
+    }
+    row.set_title(`License Key - ${message}`);
+  };
+
+  const clearMessage = () => {
+    row.remove_css_class('error');
+    row.set_title('License Key');
+  };
+
+  activateButton.connect('clicked', async () => {
+    const licenseKeyText = row.get_text().trim();
+    if (!licenseKeyText) {
+      showMessage('Please enter a license key', true);
+      return;
+    }
+
+    setLoading(true);
+    clearMessage();
+
+    try {
+      const licenseKey = new LicenseKey(licenseKeyText);
+      const result = await licenseOperations.activate(licenseKey);
+
+      if (result.success) {
+        row.set_text('');
+        if (result.deactivatedDevice) {
+          console.log(`[LicenseUI] Device deactivated: ${result.deactivatedDevice}`);
+        }
+      } else {
+        const isUserError = !result.isRetryable;
+        showMessage(result.error ?? 'Activation failed', isUserError);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'An error occurred';
+      showMessage(message, false);
+    } finally {
+      setLoading(false);
+      onUpdate();
+    }
+  });
+
+  row.connect('entry-activated', () => {
+    activateButton.emit('clicked');
+  });
+
+  row.connect('changed', () => {
+    clearMessage();
+  });
+
+  spinner.set_visible(false);
+
+  return { row, activateButton };
+}
