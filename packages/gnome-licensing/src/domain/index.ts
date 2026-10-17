@@ -1,0 +1,52 @@
+export { ActivationId, InvalidActivationIdError } from './activation-id.js';
+export type { ActivationSuccessData } from './activation-result.js';
+export { ActivationResult } from './activation-result.js';
+export { DeviceId, InvalidDeviceIdError } from './device-id.js';
+export type { DisabledReason, DisabledReasonDescription } from './disabled-reason.js';
+export { DISABLED_REASONS, describeDisabledReason } from './disabled-reason.js';
+export type { LicenseProps } from './license.js';
+export { License } from './license.js';
+export { InvalidLicenseKeyError, LicenseKey } from './license-key.js';
+export type { LicenseRejectionReason } from './license-server-outcome.js';
+export {
+  isLicenseRejectionReason,
+  LICENSE_REJECTION_REASONS,
+  LicenseServerOutcome,
+} from './license-server-outcome.js';
+export type { LicenseState } from './license-state.js';
+export {
+  createLicenseState,
+  daysSinceLastOnline,
+  isValidUntilPassed,
+  OFFLINE_GRACE_PERIOD_DAYS,
+} from './license-state.js';
+export type { LicenseStatus } from './license-status.js';
+export {
+  InvalidLicenseStatusError,
+  isValidLicenseStatus,
+  LICENSE_STATUSES,
+  parseLicenseStatus,
+} from './license-status.js';
+export type {
+  LicenseStatusDisplay,
+  LicenseStatusDisplayOptions,
+} from './license-status-display.js';
+export { getLicenseStatusDisplay } from './license-status-display.js';
+export type { NetworkState } from './network-state.js';
+export { NETWORK_STATES } from './network-state.js';
+export { InvalidTrialDaysError, TrialDays } from './trial-days.js';
+export type { TrialPeriodProps } from './trial-period.js';
+export { TrialPeriod } from './trial-period.js';
+export type { TrialProbeResult } from './trial-probe-result.js';
+export {
+  isValidTrialProbeResult,
+  TRIAL_PROBE_RESULTS,
+  trialProbeResultOf,
+} from './trial-probe-result.js';
+export type { TrialWarningDecision, TrialWarningInput } from './trial-warning.js';
+export {
+  evaluateTrialWarning,
+  formatTrialWarningMessage,
+  NO_TRIAL_WARNING,
+  TRIAL_WARNING_THRESHOLDS,
+} from './trial-warning.js';

@@ -1,0 +1,50 @@
+{
+  "name": "@haco-studio/gnome-licensing",
+  "version": "0.1.0-next.0",
+  "description": "License gate client for GNOME Shell extensions",
+  "license": "GPL-3.0-or-later",
+  "author": "x7c1",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haco-studio/capsa.git",
+    "directory": "packages/gnome-licensing"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./prefs": {
+      "types": "./dist/prefs.d.ts",
+      "import": "./dist/prefs.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@girs/adw-1": "1.10.0-4.0.0-rc.15",
+    "@girs/gio-2.0": "2.88.0-4.0.0-rc.15",
+    "@girs/gjs": "4.0.0-rc.15",
+    "@girs/glib-2.0": "2.88.0-4.0.0-rc.15",
+    "@girs/gtk-4.0": "4.23.0-4.0.0-rc.15"
+  },
+  "devDependencies": {
+    "@girs/adw-1": "1.10.0-4.0.0-rc.15",
+    "@girs/gio-2.0": "2.88.0-4.0.0-rc.15",
+    "@girs/gjs": "4.0.0-rc.15",
+    "@girs/glib-2.0": "2.88.0-4.0.0-rc.15",
+    "@girs/gtk-4.0": "4.23.0-4.0.0-rc.15"
+  }
+}
