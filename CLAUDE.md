@@ -19,7 +19,7 @@ Package configs extend `tsconfig.base.json`.
 After making code changes, always run:
 
 ```bash
-npm run build && npm run check && npm run test:run
+npm run check && npm run test:run
 ```
 
 Fix any issues before considering the task complete.

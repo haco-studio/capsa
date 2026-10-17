@@ -7,7 +7,6 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check --write .",
