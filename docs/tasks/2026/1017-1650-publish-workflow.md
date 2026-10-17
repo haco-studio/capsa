@@ -62,10 +62,10 @@ there is none). Keep it free of any reference to private repositories.
 
 ### Before merge (verified outside the check command)
 
-- [ ] Reading the workflow confirms: it refuses a ref other than `main`;
+- [x] Reading the workflow confirms: it refuses a ref other than `main`;
       it rejects a `package` input that is not a directory under
       `packages/` or that contains a path separator; `packages: write` is
       granted only to the publishing job; pre-releases go to `next`; an
       already published version is refused.
-- [ ] `actionlint` (if available locally) reports no problem in
+- [x] `actionlint` (if available locally) reports no problem in
       `publish.yml`.
