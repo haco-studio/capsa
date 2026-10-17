@@ -16,3 +16,7 @@ The packages are served from GitHub Packages, which requires a token with the `r
 ```
 
 Then install a package with `npm install @haco-studio/<package>`.
+
+## Documentation
+
+- [Publishing a package](docs/guides/publishing.md): how to publish a package to GitHub Packages with the Publish workflow.
