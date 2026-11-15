@@ -2,7 +2,7 @@
 globalThis.log = () => {};
 
 import { describe, expect, it } from 'vitest';
-import type { License, LicenseStatus } from '../domain/index.js';
+import type { License, LicenseStatus, TrialProbeResult } from '../domain/index.js';
 import { TrialDays, TrialPeriod } from '../domain/index.js';
 import type { LicenseRepository } from './license-repository.js';
 import type { NotificationService } from './notification-service.js';
@@ -19,6 +19,7 @@ function createMockRepository(options: {
   status: LicenseStatus;
   daysRemaining: number;
   trialWarningThreshold: number;
+  trialProbeResult?: TrialProbeResult;
 }): LicenseRepository {
   let trialWarningThreshold = options.trialWarningThreshold;
   const trialPeriod = new TrialPeriod({
@@ -43,8 +44,10 @@ function createMockRepository(options: {
     },
     getLastOnlineAt: notImplemented('getLastOnlineAt'),
     setLastOnlineAt: notImplemented('setLastOnlineAt'),
-    getTrialProbeResult: notImplemented('getTrialProbeResult'),
+    getTrialProbeResult: () => options.trialProbeResult ?? 'answered',
     setTrialProbeResult: notImplemented('setTrialProbeResult'),
+    getTrialProbedAt: notImplemented('getTrialProbedAt'),
+    setTrialProbedAt: notImplemented('setTrialProbedAt'),
     watchChanges: notImplemented('watchChanges'),
   };
 }
@@ -155,4 +158,26 @@ describe('TrialWarningOperations', () => {
     expect(recorded).toEqual([]);
     expect(repository.getTrialWarningThreshold()).toBe(0);
   });
+
+  it.each(['none', 'no-response'] as const)(
+    'holds back a due warning without recording it when the probe result is %s',
+    (trialProbeResult) => {
+      const repository = createMockRepository({
+        status: 'trial',
+        daysRemaining: 3,
+        trialWarningThreshold: 0,
+        trialProbeResult,
+      });
+      const recorded: RecordedNotification[] = [];
+
+      new TrialWarningOperations(
+        repository,
+        createMockNotificationService(recorded),
+        'Example'
+      ).checkAndNotify();
+
+      expect(recorded).toEqual([]);
+      expect(repository.getTrialWarningThreshold()).toBe(0);
+    }
+  );
 });

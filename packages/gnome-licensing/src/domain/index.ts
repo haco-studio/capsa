@@ -39,7 +39,9 @@ export type { TrialPeriodProps } from './trial-period.js';
 export { TrialPeriod } from './trial-period.js';
 export type { TrialProbeResult } from './trial-probe-result.js';
 export {
+  isTrialProbeFresh,
   isValidTrialProbeResult,
+  TRIAL_PROBE_FRESH_MINUTES,
   TRIAL_PROBE_RESULTS,
   trialProbeResultOf,
 } from './trial-probe-result.js';
@@ -47,6 +49,7 @@ export type { TrialWarningDecision, TrialWarningInput } from './trial-warning.js
 export {
   evaluateTrialWarning,
   formatTrialWarningMessage,
+  isTrialWarningThresholdReached,
   NO_TRIAL_WARNING,
   TRIAL_WARNING_THRESHOLDS,
 } from './trial-warning.js';

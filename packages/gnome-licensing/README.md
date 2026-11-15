@@ -6,10 +6,14 @@ This package is built for the author's own extensions. It is published so those 
 
 ## Behavior
 
-- **Trial by day of use.** The trial lasts 30 days of use. A day counts once, the first time the extension is used on that calendar day.
+The gate is a reminder, not enforcement: it locks the extension or urges a purchase only when the user can act on it right away, that is, only while the license server answers.
+
+- **Trial by day of use.** The trial lasts 30 days of use. A day counts once, the first time the extension is used on that calendar day. The 30th day is usable; the trial ends with the first use on a 31st day.
+- **Lock after the trial only while the server answers.** An ended trial is locked only when the most recent probe of the license server (a validation request with an empty license key) got an answer. When it got no response, or no probe has been made yet, the extension opens, subject to the offline limit below. A server outage and a retired server are not told apart, so retiring the server never strands anyone.
+- **Pre-expiry warning only while the server answers.** The user is warned when 3 and then 1 days of use are left, once each, and only when the most recent probe got an answer. A warning held back for want of an answer is not recorded as shown, so it is shown once a later probe gets an answer while its threshold still applies.
+- **When the server is probed.** Once the trial has ended or a warning threshold has been reached, the license server is probed in the background on `initialize()`, on each `recordUse()` and when the network comes back online, but only while the device is online, at most once per 30 minutes, and never while another probe is under way. A use never waits for the probe: the gate decides from the stored result, and when the probe completes and changes that decision, the cached disabled reason is updated and state listeners are notified.
 - **No downgrade on no response.** Only an answer from the license server can expire or invalidate a license. A timeout, a transport failure, a 5xx, a 404, a 410 or a 4xx without a known reason code counts as no response and keeps the stored status.
-- **Offline limit.** A valid license keeps working offline for 7 days, counted from the last time the device was online (whether or not the license server answered).
-- **Keyless probe after the trial.** Once the trial has ended, the client asks the license server whether it is still there, with an empty license key. An ended trial stays locked while the server answers and opens once it no longer does, so retiring the server never strands anyone.
+- **Offline limit.** A valid license, and an ended trial that is open, keep working offline for 7 days, counted from the last time the device was online (whether or not the license server answered).
 
 ## Entry points
 
@@ -52,7 +56,10 @@ The repository reads and writes these keys of the `Gio.Settings` object it is gi
 | `trial-days-used` | `i` | `0` | Days of use counted during the trial (0 to 30) |
 | `trial-last-used-date` | `s` | `''` | Last day counted, as `YYYY-MM-DD` |
 | `trial-warning-last-threshold` | `i` | `0` | Remaining-day threshold (3 or 1) last warned about; `0` means none |
-| `trial-probe-result` | `s` | `'none'` | `none`, `answered` or `no-response` |
+| `trial-probe-result` | `s` | `'none'` | Result of the most recent probe of the license server: `none`, `answered` or `no-response` |
+| `trial-probed-at` | `x` | `0` | Time of the most recent probe of the license server (Unix seconds); `0` means none |
+
+`trial-probed-at` was added in `0.1.0-next.1`. An extension upgrading from an earlier version adds it to its schema before shipping the upgrade: reading a key the schema does not declare aborts the Shell.
 
 For example:
 

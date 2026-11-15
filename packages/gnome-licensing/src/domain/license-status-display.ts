@@ -35,9 +35,14 @@ export function getLicenseStatusDisplay(
   const purchaseAvailable = options.purchaseAvailable ?? true;
 
   if (status === 'trial') {
+    // The last counted day is still usable, so no days left means today is the last.
+    const subtitle =
+      trialDaysRemaining === 0
+        ? 'Last day of use'
+        : `${trialDaysRemaining} ${trialDaysRemaining === 1 ? 'day' : 'days'} of use left`;
     return {
       title: 'Trial',
-      subtitle: `${trialDaysRemaining} ${trialDaysRemaining === 1 ? 'day' : 'days'} of use left`,
+      subtitle,
       showPurchaseLink: purchaseAvailable,
     };
   }

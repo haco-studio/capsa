@@ -5,6 +5,11 @@ export interface TrialPeriodProps {
   lastUsedDate: string;
 }
 
+/**
+ * The Trial Period: days of use counted once per calendar day, up to
+ * TrialDays.LIMIT. Every counted day is usable, the last one included; the
+ * trial ends with the first use on a day after the last counted one.
+ */
 export class TrialPeriod {
   readonly daysUsed: TrialDays;
   readonly lastUsedDate: string;
@@ -21,16 +26,21 @@ export class TrialPeriod {
     });
   }
 
+  /** Days of use left after today's, if today has been counted. */
   getRemainingDays(): number {
     return this.daysUsed.remaining();
   }
 
-  isExpired(): boolean {
-    return this.daysUsed.isExpired();
+  /**
+   * Whether the trial has ended as of `today`: every day has been counted and
+   * `today` is not the last counted day.
+   */
+  hasEnded(today: string): boolean {
+    return this.daysUsed.isExhausted() && this.lastUsedDate !== today;
   }
 
   canRecordUsage(today: string): boolean {
-    return this.lastUsedDate !== today && !this.isExpired();
+    return this.lastUsedDate !== today && !this.daysUsed.isExhausted();
   }
 
   recordUsage(today: string): TrialPeriod {

@@ -7,10 +7,12 @@ declare function log(message: string): void;
 const WARNING_TITLE = 'Trial ending soon';
 
 /**
- * Warns the user before the trial ends.
+ * Warns the user before the trial ends, only while the license server answers.
  *
  * Evaluated whenever a new trial day is recorded (when the user uses the
- * extension), since that is the only time the remaining days decrease.
+ * extension), since that is the only time the remaining days decrease, and
+ * after the license server has been probed, since a warning held back for
+ * want of an answer is shown once a probe gets one.
  */
 export class TrialWarningOperations {
   /**
@@ -23,8 +25,9 @@ export class TrialWarningOperations {
   ) {}
 
   /**
-   * Notify the user if the trial just crossed a warning threshold, and persist
-   * the threshold so it does not fire again for the same threshold.
+   * Notify the user if the trial has crossed a warning threshold not yet
+   * warned about and the most recent probe got an answer from the license
+   * server, and persist the threshold so it does not fire again.
    */
   checkAndNotify(): void {
     const trial = this.repository.loadTrialPeriod();
@@ -35,6 +38,7 @@ export class TrialWarningOperations {
       status: this.repository.getStatus(),
       trialDaysRemaining,
       lastWarnedThreshold,
+      serverAnswered: this.repository.getTrialProbeResult() === 'answered',
     });
 
     if (decision.lastWarnedThreshold !== lastWarnedThreshold) {

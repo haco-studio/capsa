@@ -56,6 +56,8 @@ function createSharedStorage() {
     },
     getTrialProbeResult: () => 'none',
     setTrialProbeResult: unexpected('setTrialProbeResult'),
+    getTrialProbedAt: () => null,
+    setTrialProbedAt: unexpected('setTrialProbedAt'),
     watchChanges: (callback) => {
       watchers.add(callback);
       return () => watchers.delete(callback);
@@ -88,7 +90,15 @@ function createTrialStorage(
     trialWarningThreshold: number;
     lastOnlineAt: Date | null;
     trialProbeResult: TrialProbeResult;
-  } = { status, trialPeriod, trialWarningThreshold, lastOnlineAt: null, trialProbeResult: 'none' };
+    trialProbedAt: Date | null;
+  } = {
+    status,
+    trialPeriod,
+    trialWarningThreshold,
+    lastOnlineAt: null,
+    trialProbeResult: 'none',
+    trialProbedAt: null,
+  };
   const savedTrialPeriods: TrialPeriod[] = [];
 
   const repository: LicenseRepository = {
@@ -115,6 +125,10 @@ function createTrialStorage(
     getTrialProbeResult: () => store.trialProbeResult,
     setTrialProbeResult: (result) => {
       store.trialProbeResult = result;
+    },
+    getTrialProbedAt: () => store.trialProbedAt,
+    setTrialProbedAt: (date) => {
+      store.trialProbedAt = date;
     },
     watchChanges: () => () => {},
   };
@@ -157,22 +171,72 @@ function createNetwork(initial: NetworkState = 'online') {
 }
 
 const NOW = new Date('2026-06-15T12:00:00Z');
+const MINUTE = 60 * 1000;
+
+/** A clock that starts at NOW and can be moved forward. */
+function createClock() {
+  const clock = {
+    now: NOW,
+    advanceMinutes(minutes: number) {
+      clock.now = new Date(clock.now.getTime() + minutes * MINUTE);
+    },
+  };
+  return clock;
+}
+
+/** `date` as YYYY-MM-DD in UTC, which is how the clock's days are named here. */
+function dayOf(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * A license server reached through probe(): it answers until told otherwise,
+ * counts the probes, and can hold them until released.
+ */
+function createLicenseServer() {
+  const held: (() => void)[] = [];
+  const server = {
+    answers: true,
+    hold: false,
+    probes: 0,
+    probe(): Promise<ValidationResult> {
+      server.probes++;
+      const outcome = () =>
+        server.answers
+          ? ValidationResult.rejected('INVALID_LICENSE_KEY')
+          : ValidationResult.noResponse();
+      if (!server.hold) {
+        return Promise.resolve(outcome());
+      }
+      return new Promise((resolve) => {
+        held.push(() => resolve(outcome()));
+      });
+    },
+    release() {
+      for (const resolve of held.splice(0)) {
+        resolve();
+      }
+    },
+  };
+  return server;
+}
 
 function createHandler(
   repository: LicenseRepository,
   warnings: string[] = [],
-  networkStateProvider = createNetwork().provider
+  networkStateProvider = createNetwork().provider,
+  server = createLicenseServer(),
+  clock = createClock()
 ): LicenseStateHandler {
   const apiClient: LicenseApiClient = {
     activate: unexpected('activate'),
     validate: unexpected('validate'),
-    // The license server always answers here, so an ended trial stays locked.
-    probe: async () => ValidationResult.rejected('INVALID_LICENSE_KEY'),
+    probe: () => server.probe(),
   };
   const licenseOperations = new LicenseOperations(
     repository,
     apiClient,
-    { now: () => NOW, today: () => '2026-06-15' },
+    { now: () => clock.now, today: () => dayOf(clock.now) },
     networkStateProvider,
     { getDeviceId: () => new DeviceId('test-device'), getDeviceLabel: () => 'Test Device' }
   );
@@ -366,20 +430,70 @@ describe('LicenseStateHandler', () => {
       }
     );
 
-    it('locks the panel as soon as the day that reaches the limit is recorded', async () => {
+    it('keeps the extension usable on the 30th day of the trial', async () => {
       const storage = createTrialStorage('trial', trialPeriod(29, '2026-06-14'));
       const handler = createHandler(storage.repository);
       handler.initialize(() => {});
       await flushPromises();
-      expect(handler.getDisabledReason()).toBeNull();
 
       handler.recordUse();
+      await flushPromises();
 
-      expect(handler.getDisabledReason()).toBe('trial-expired');
-      expect(storage.store.status).toBe('trial-expired');
+      expect(storage.store.trialPeriod.daysUsed.toNumber()).toBe(30);
+      expect(storage.store.status).toBe('trial');
+      expect(handler.getDisabledReason()).toBeNull();
     });
 
-    it('warns when a recorded day crosses a warning threshold', async () => {
+    it('locks as soon as the trial ends during the session while the license server answers', async () => {
+      const storage = createTrialStorage('trial', trialPeriod(30, '2026-06-15'));
+      const clock = createClock();
+      const handler = createHandler(storage.repository, [], undefined, undefined, clock);
+      handler.initialize(() => {});
+      await flushPromises();
+      expect(storage.store.trialProbeResult).toBe('answered');
+      expect(handler.getDisabledReason()).toBeNull();
+
+      clock.advanceMinutes(24 * 60);
+      handler.recordUse();
+
+      expect(storage.store.status).toBe('trial-expired');
+      expect(handler.getDisabledReason()).toBe('trial-expired');
+    });
+
+    it('stays open when the trial ends during the session while the license server does not answer', async () => {
+      const storage = createTrialStorage('trial', trialPeriod(30, '2026-06-15'));
+      const server = createLicenseServer();
+      server.answers = false;
+      const clock = createClock();
+      const handler = createHandler(storage.repository, [], undefined, server, clock);
+      handler.initialize(() => {});
+      await flushPromises();
+
+      clock.advanceMinutes(24 * 60);
+      handler.recordUse();
+      expect(storage.store.status).toBe('trial-expired');
+      expect(handler.getDisabledReason()).toBeNull();
+
+      await flushPromises();
+      expect(server.probes).toBe(2);
+      expect(handler.getDisabledReason()).toBeNull();
+    });
+
+    it('stays open when the trial ends during the session before any probe', async () => {
+      const storage = createTrialStorage('trial', trialPeriod(30, '2026-06-14'));
+      const handler = createHandler(storage.repository, [], createNetwork('offline').provider);
+      handler.initialize(() => {});
+      await flushPromises();
+
+      handler.recordUse();
+      await flushPromises();
+
+      expect(storage.store.status).toBe('trial-expired');
+      expect(storage.store.trialProbeResult).toBe('none');
+      expect(handler.getDisabledReason()).toBeNull();
+    });
+
+    it('warns when a recorded day crosses a warning threshold and the license server answers', async () => {
       const storage = createTrialStorage('trial', trialPeriod(26, '2026-06-14'));
       const warnings: string[] = [];
       const handler = createHandler(storage.repository, warnings);
@@ -388,25 +502,182 @@ describe('LicenseStateHandler', () => {
       expect(warnings).toEqual([]);
 
       handler.recordUse();
+      await flushPromises();
 
       expect(warnings).toHaveLength(1);
       expect(storage.store.trialWarningThreshold).toBe(3);
     });
 
-    it('does not warn when no day was recorded', async () => {
-      // 3 days remain, but the threshold has not been warned about yet:
-      // only recording a new day may send the warning.
-      const storage = createTrialStorage('trial', trialPeriod(27, '2026-06-15'));
+    it('holds back a reached warning without an answer and shows it once a later probe gets one', async () => {
+      const storage = createTrialStorage('trial', trialPeriod(26, '2026-06-14'));
+      const server = createLicenseServer();
+      server.answers = false;
+      const clock = createClock();
       const warnings: string[] = [];
-      const handler = createHandler(storage.repository, warnings);
+      const handler = createHandler(storage.repository, warnings, undefined, server, clock);
       handler.initialize(() => {});
       await flushPromises();
 
       handler.recordUse();
-
-      expect(storage.savedTrialPeriods).toEqual([]);
+      await flushPromises();
+      expect(server.probes).toBe(1);
       expect(warnings).toEqual([]);
+      expect(storage.store.trialWarningThreshold).toBe(0);
+
+      server.answers = true;
+      clock.advanceMinutes(31);
+      handler.recordUse();
+      await flushPromises();
+
+      expect(server.probes).toBe(2);
+      expect(warnings).toEqual([
+        'Your Example trial has 3 days of use left. Activate a license to keep using it.',
+      ]);
+      expect(storage.store.trialWarningThreshold).toBe(3);
     });
+
+    it('does not probe before a warning threshold is reached', async () => {
+      const storage = createTrialStorage('trial', trialPeriod(5, '2026-06-14'));
+      const server = createLicenseServer();
+      const handler = createHandler(storage.repository, [], undefined, server);
+      handler.initialize(() => {});
+      await flushPromises();
+
+      handler.recordUse();
+      await flushPromises();
+
+      expect(server.probes).toBe(0);
+    });
+
+    describe('after the trial', () => {
+      function endedTrialStorage(probedMinutesAgo: number) {
+        const storage = createTrialStorage('trial-expired', trialPeriod(30, '2026-06-01'));
+        storage.store.trialProbeResult = 'answered';
+        storage.store.trialProbedAt = new Date(NOW.getTime() - probedMinutesAgo * MINUTE);
+        return storage;
+      }
+
+      it('probes on use only once the stored result is 30 minutes old', async () => {
+        const storage = endedTrialStorage(10);
+        const server = createLicenseServer();
+        const clock = createClock();
+        const handler = createHandler(storage.repository, [], undefined, server, clock);
+        handler.initialize(() => {});
+        await flushPromises();
+        expect(server.probes).toBe(0);
+
+        handler.recordUse();
+        await flushPromises();
+        expect(server.probes).toBe(0);
+
+        clock.advanceMinutes(20);
+        handler.recordUse();
+        await flushPromises();
+        expect(server.probes).toBe(1);
+        expect(storage.store.trialProbedAt).toEqual(clock.now);
+      });
+
+      it('never waits for a probe, and starts no second one on use or network recovery while it is in flight', async () => {
+        const storage = endedTrialStorage(10);
+        const server = createLicenseServer();
+        const clock = createClock();
+        const { network, provider } = createNetwork('online');
+        const handler = createHandler(storage.repository, [], provider, server, clock);
+        handler.initialize(() => {});
+        await flushPromises();
+        const states: string[] = [];
+        handler.onStateChange((state) => states.push(state.status));
+
+        server.hold = true;
+        server.answers = false;
+        clock.advanceMinutes(30);
+        handler.recordUse();
+        expect(server.probes).toBe(1);
+        expect(handler.getDisabledReason()).toBe('trial-expired');
+
+        handler.recordUse();
+        network.change('online');
+        expect(server.probes).toBe(1);
+
+        server.release();
+        await flushPromises();
+        expect(handler.getDisabledReason()).toBeNull();
+        expect(storage.store.trialProbeResult).toBe('no-response');
+        expect(states).toEqual(['trial-expired']);
+      });
+
+      it('probes when the network comes back, unless the stored result is fresh', async () => {
+        const storage = endedTrialStorage(10);
+        const server = createLicenseServer();
+        server.answers = false;
+        const clock = createClock();
+        const { network, provider } = createNetwork('offline');
+        const handler = createHandler(storage.repository, [], provider, server, clock);
+        handler.initialize(() => {});
+        await flushPromises();
+        expect(handler.getDisabledReason()).toBe('trial-expired');
+
+        network.change('online');
+        await flushPromises();
+        expect(server.probes).toBe(0);
+        expect(handler.getDisabledReason()).toBe('trial-expired');
+
+        network.change('offline');
+        clock.advanceMinutes(25);
+        network.change('online');
+        await flushPromises();
+
+        expect(server.probes).toBe(1);
+        expect(handler.getDisabledReason()).toBeNull();
+      });
+
+      it('reports the lock when a probe on network recovery gets an answer again', async () => {
+        const storage = endedTrialStorage(60);
+        storage.store.trialProbeResult = 'no-response';
+        const server = createLicenseServer();
+        const { network, provider } = createNetwork('offline');
+        const handler = createHandler(storage.repository, [], provider, server);
+        const reasons: DisabledReason[] = [];
+        handler.initialize((reason) => reasons.push(reason));
+        await flushPromises();
+        expect(handler.getDisabledReason()).toBeNull();
+
+        network.change('online');
+        await flushPromises();
+
+        expect(server.probes).toBe(1);
+        expect(handler.getDisabledReason()).toBe('trial-expired');
+        expect(reasons).toEqual(['trial-expired']);
+      });
+    });
+  });
+
+  it('warns after initialize once a probe answers for a threshold reached earlier', async () => {
+    const storage = createTrialStorage('trial', trialPeriod(27, '2026-06-15'));
+    const warnings: string[] = [];
+    const handler = createHandler(storage.repository, warnings);
+
+    handler.initialize(() => {});
+    await flushPromises();
+
+    expect(storage.savedTrialPeriods).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(storage.store.trialWarningThreshold).toBe(3);
+  });
+
+  it('does not warn after initialize while the license server does not answer', async () => {
+    const storage = createTrialStorage('trial', trialPeriod(27, '2026-06-15'));
+    const server = createLicenseServer();
+    server.answers = false;
+    const warnings: string[] = [];
+    const handler = createHandler(storage.repository, warnings, undefined, server);
+
+    handler.initialize(() => {});
+    await flushPromises();
+
+    expect(server.probes).toBe(1);
+    expect(warnings).toEqual([]);
+    expect(storage.store.trialWarningThreshold).toBe(0);
   });
 
   it('does not record a trial day on initialize', async () => {

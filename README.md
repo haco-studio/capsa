@@ -4,7 +4,7 @@ TypeScript libraries published as `@haco-studio/*` packages on GitHub Packages.
 
 ## Status
 
-Early development. No package has been published yet. Packages stay at `0.x` while their APIs settle, and a `0.x` release may break compatibility.
+Early development. `@haco-studio/gnome-licensing` is published as a pre-release under the `next` dist-tag (`npm install @haco-studio/gnome-licensing@next`). Packages stay at `0.x` while their APIs settle, and a `0.x` release may break compatibility.
 
 ## Getting started
 
