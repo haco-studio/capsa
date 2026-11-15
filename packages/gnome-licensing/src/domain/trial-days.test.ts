@@ -62,14 +62,14 @@ describe('TrialDays', () => {
     });
   });
 
-  describe('isExpired', () => {
+  describe('isExhausted', () => {
     it('returns false when days < 30', () => {
-      expect(new TrialDays(0).isExpired()).toBe(false);
-      expect(new TrialDays(29).isExpired()).toBe(false);
+      expect(new TrialDays(0).isExhausted()).toBe(false);
+      expect(new TrialDays(29).isExhausted()).toBe(false);
     });
 
     it('returns true when days = 30', () => {
-      expect(new TrialDays(30).isExpired()).toBe(true);
+      expect(new TrialDays(30).isExhausted()).toBe(true);
     });
   });
 

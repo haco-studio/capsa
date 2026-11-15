@@ -7,10 +7,13 @@ import type {
   LicenseState,
   LicenseStatus,
   NetworkState,
+  TrialProbeResult,
 } from '../domain/index.js';
 import {
   createLicenseState,
   daysSinceLastOnline,
+  isTrialProbeFresh,
+  isTrialWarningThresholdReached,
   isValidUntilPassed,
   License,
   OFFLINE_GRACE_PERIOD_DAYS,
@@ -73,6 +76,8 @@ export class LicenseOperations {
   private readonly networkStateProvider: NetworkStateProvider;
   private readonly deviceInfoProvider: DeviceInfoProvider;
   private stateChangeCallbacks: ((state: LicenseState) => void)[] = [];
+  /** The probe of the license server under way, if any. */
+  private probeInFlight: Promise<ProbeCompletion> | null = null;
 
   constructor(
     repository: LicenseRepository,
@@ -107,8 +112,9 @@ export class LicenseOperations {
       await this.validateLicense();
     }
 
-    // Asking offline cannot get an answer; the stored result is kept instead.
-    if (this.getEffectiveStatus() === 'trial-expired' && online) {
+    // State change callbacks are notified below whether or not the probe
+    // changed anything.
+    if (this.isProbeDue()) {
       await this.probeLicenseServer();
     }
 
@@ -223,9 +229,11 @@ export class LicenseOperations {
       case 'trial':
         return null;
       case 'trial-expired':
-        // The license gate is a reminder, not enforcement: once the license
-        // server no longer answers, an ended trial opens like a valid license.
-        if (this.repository.getTrialProbeResult() !== 'no-response') {
+        // The license gate is a reminder, not enforcement: an ended trial is
+        // locked only while the license server answers, when a license can be
+        // bought right away. Without an answer (or before any probe) it opens
+        // like a valid license, offline grace period included.
+        if (this.repository.getTrialProbeResult() === 'answered') {
           return 'trial-expired';
         }
         return isOfflineGraceExceeded(state) ? 'offline-grace-exceeded' : null;
@@ -319,7 +327,9 @@ export class LicenseOperations {
   /**
    * Record today as a trial usage day, at most once per calendar day.
    * Does nothing unless the stored status is trial, so a licensed user never
-   * gets trial days written.
+   * gets trial days written. Once every day has been counted, the last one is
+   * still usable, and the first use on a later day ends the trial: the status
+   * becomes trial-expired and state change callbacks are notified.
    * @returns true when a new day was recorded
    */
   recordTrialUsage(): boolean {
@@ -329,6 +339,13 @@ export class LicenseOperations {
 
     const trial = this.repository.loadTrialPeriod();
     const today = this.dateProvider.today();
+
+    if (trial.hasEnded(today)) {
+      log('[LicenseOperations] Trial period has ended');
+      this.repository.setStatus('trial-expired');
+      this.notifyStateChange();
+      return false;
+    }
 
     if (!trial.canRecordUsage(today)) {
       return false;
@@ -341,13 +358,29 @@ export class LicenseOperations {
       `[LicenseOperations] Recorded trial day ${updatedTrial.daysUsed.toNumber()}/${TrialDays.LIMIT} (${today})`
     );
 
-    if (updatedTrial.isExpired()) {
-      log('[LicenseOperations] Trial period has ended');
-      this.repository.setStatus('trial-expired');
-    }
-
     this.notifyStateChange();
     return true;
+  }
+
+  /**
+   * Ask the license server whether it is there when a probe is due: the trial
+   * has ended or reached a warning threshold, the device is online, the stored
+   * result is not fresh, and no probe is under way. Nothing waits for the
+   * answer to decide whether the extension is enabled; that is decided from
+   * the stored result. When the probe changes that decision, state change
+   * callbacks are notified.
+   * @returns The stored probe result once the probe completes, or null when no
+   *   probe was due
+   */
+  async probeLicenseServerIfDue(): Promise<TrialProbeResult | null> {
+    if (!this.isProbeDue()) {
+      return null;
+    }
+    const { result, decisionChanged } = await this.probeLicenseServer();
+    if (decisionChanged) {
+      this.notifyStateChange();
+    }
+    return result;
   }
 
   /**
@@ -363,23 +396,72 @@ export class LicenseOperations {
   }
 
   /**
-   * Ask the license server whether it is there and store whether it answered.
-   * An ended trial opens only when the license server no longer answers.
+   * Whether the license server should be asked now whether it is there.
+   * Only an ended trial and a pre-expiry warning depend on its answer. Asking
+   * offline cannot get an answer, so the stored result is kept instead.
    */
-  private async probeLicenseServer(): Promise<void> {
-    const outcome = await this.apiClient.probe();
-    const result = trialProbeResultOf(outcome);
-    log(`[LicenseOperations] License server probe after the trial: ${result}`);
-    this.repository.setTrialProbeResult(result);
+  private isProbeDue(): boolean {
+    if (!this.dependsOnLicenseServer()) {
+      return false;
+    }
+    if (this.probeInFlight !== null) {
+      return false;
+    }
+    if (this.networkStateProvider.getNetworkState() !== 'online') {
+      return false;
+    }
+    return !isTrialProbeFresh(this.repository.getTrialProbedAt(), this.dateProvider.now());
   }
 
   /**
-   * The stored status, except that a trial whose days are used up (e.g.
-   * written by another process) counts as trial-expired.
+   * Whether the license gate depends on the license server's answer: the
+   * trial has ended, or it has reached a pre-expiry warning threshold.
+   */
+  private dependsOnLicenseServer(): boolean {
+    const status = this.getEffectiveStatus();
+    if (status === 'trial-expired') {
+      return true;
+    }
+    return (
+      status === 'trial' &&
+      isTrialWarningThresholdReached(this.repository.loadTrialPeriod().getRemainingDays())
+    );
+  }
+
+  /**
+   * Ask the license server whether it is there, and store whether it answered
+   * and when. A probe already under way is joined instead of starting another.
+   */
+  private probeLicenseServer(): Promise<ProbeCompletion> {
+    if (this.probeInFlight === null) {
+      this.probeInFlight = this.apiClient
+        .probe()
+        .then((outcome) => {
+          const result = trialProbeResultOf(outcome);
+          log(`[LicenseOperations] License server probe: ${result}`);
+          const reasonBefore = this.getDisabledReason();
+          this.repository.setTrialProbeResult(result);
+          this.repository.setTrialProbedAt(this.dateProvider.now());
+          return { result, decisionChanged: this.getDisabledReason() !== reasonBefore };
+        })
+        .finally(() => {
+          this.probeInFlight = null;
+        });
+    }
+    return this.probeInFlight;
+  }
+
+  /**
+   * The stored status, except that a trial that has ended (e.g. its last day
+   * was counted on an earlier day, or written by another process) counts as
+   * trial-expired.
    */
   private getEffectiveStatus(): LicenseStatus {
     const status = this.repository.getStatus();
-    if (status === 'trial' && this.repository.loadTrialPeriod().isExpired()) {
+    if (
+      status === 'trial' &&
+      this.repository.loadTrialPeriod().hasEnded(this.dateProvider.today())
+    ) {
       return 'trial-expired';
     }
     return status;
@@ -442,6 +524,12 @@ export class LicenseOperations {
       }
     }
   }
+}
+
+/** What a completed probe stored, and whether it changed the license gate's decision. */
+interface ProbeCompletion {
+  readonly result: TrialProbeResult;
+  readonly decisionChanged: boolean;
 }
 
 /**

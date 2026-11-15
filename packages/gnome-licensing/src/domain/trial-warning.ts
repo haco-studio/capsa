@@ -3,8 +3,14 @@
  *
  * Decides whether the user should be warned that the trial is about to end.
  * The decision is pure: the caller supplies the current status, the remaining
- * trial days and the threshold that was last warned about, and persists the
- * returned threshold so a warning fires at most once per trial.
+ * trial days, the threshold that was last warned about and whether the license
+ * server answered the most recent probe, and persists the returned threshold
+ * so a warning fires at most once per trial.
+ *
+ * A warning urges the user to buy a license, so it is shown only while the
+ * license server answers: without it there is nothing to buy. A warning held
+ * back for that reason is not recorded as warned, so it is shown once a later
+ * probe gets an answer while its threshold still applies.
  */
 
 import type { LicenseStatus } from './license-status.js';
@@ -19,11 +25,22 @@ export const TRIAL_WARNING_THRESHOLDS = [3, 1] as const;
  */
 export const NO_TRIAL_WARNING = 0;
 
+/**
+ * Whether the remaining trial days have reached a warning threshold, whether
+ * or not it has been warned about. From then on the license server is probed
+ * on use, so a warning held back for want of an answer can still be shown.
+ */
+export function isTrialWarningThresholdReached(trialDaysRemaining: number): boolean {
+  return trialDaysRemaining <= Math.max(...TRIAL_WARNING_THRESHOLDS);
+}
+
 export interface TrialWarningInput {
   readonly status: LicenseStatus;
   readonly trialDaysRemaining: number;
   /** Threshold already warned about, or NO_TRIAL_WARNING when none. */
   readonly lastWarnedThreshold: number;
+  /** Whether the most recent probe got an answer from the license server. */
+  readonly serverAnswered: boolean;
 }
 
 export interface TrialWarningDecision {
@@ -64,6 +81,12 @@ export function evaluateTrialWarning(input: TrialWarningInput): TrialWarningDeci
   const alreadyWarned =
     input.lastWarnedThreshold !== NO_TRIAL_WARNING && threshold >= input.lastWarnedThreshold;
   if (alreadyWarned) {
+    return { thresholdToWarn: null, lastWarnedThreshold: input.lastWarnedThreshold };
+  }
+
+  // Nothing can be bought while the license server does not answer. Leave the
+  // threshold unwarned so a later answer can still show it.
+  if (!input.serverAnswered) {
     return { thresholdToWarn: null, lastWarnedThreshold: input.lastWarnedThreshold };
   }
 

@@ -37,18 +37,28 @@ export class LicenseStateHandler {
     this.stopWatchingStoredChanges = this.licenseOperations.watchStoredChanges();
 
     // Reconnecting ends an exceeded offline grace period, so recompute the
-    // cached disabled reason whenever the device comes online.
+    // cached disabled reason whenever the device comes online. The license
+    // server can be asked again then, too.
     this.stopWatchingNetworkState?.();
     this.stopWatchingNetworkState = this.licenseOperations.watchNetworkState(() => {
       this.disabledReason = this.licenseOperations.getDisabledReason();
+      this.probeInBackground();
     });
 
-    this.licenseOperations.initialize().then(() => {
-      this.disabledReason = this.licenseOperations.getDisabledReason();
-      if (this.disabledReason) {
-        log(`[LicenseStateHandler] License invalid on startup: ${this.disabledReason}`);
-      }
-    });
+    this.licenseOperations
+      .initialize()
+      .then(() => {
+        this.disabledReason = this.licenseOperations.getDisabledReason();
+        if (this.disabledReason) {
+          log(`[LicenseStateHandler] License invalid on startup: ${this.disabledReason}`);
+        }
+        // initialize() may have probed the license server; a warning held
+        // back for want of an answer is shown once a probe gets one.
+        this.trialWarningOperations.checkAndNotify();
+      })
+      .catch((e) => {
+        log(`[LicenseStateHandler] Initialization failed: ${e}`);
+      });
   }
 
   /**
@@ -57,10 +67,16 @@ export class LicenseStateHandler {
    * this records now as the last time it was online. During the trial it also
    * counts today as a usage day (at most once per calendar day) and, when a
    * new day was recorded, warns the user if a pre-expiry threshold was just
-   * crossed.
+   * crossed and the license server answers.
    *
-   * Call it before reading getDisabledReason(): recording the day that reaches
-   * the limit ends the trial, and the resulting state change updates the
+   * Once the trial has ended or reached a warning threshold, it also asks the
+   * license server in the background whether it is there, unless it was asked
+   * within the last 30 minutes or is being asked already. The use never waits
+   * for the answer: when it arrives and changes whether the extension is
+   * enabled, the disabled reason is updated and state listeners are notified.
+   *
+   * Call it before reading getDisabledReason(): the first use after the last
+   * trial day ends the trial, and the resulting state change updates the
    * disabled reason synchronously.
    */
   recordUse(): void {
@@ -68,6 +84,24 @@ export class LicenseStateHandler {
     if (this.licenseOperations.recordTrialUsage()) {
       this.trialWarningOperations.checkAndNotify();
     }
+    this.probeInBackground();
+  }
+
+  /**
+   * Ask the license server whether it is there when a probe is due, without
+   * waiting for it, and evaluate the pre-expiry warning again once it answers.
+   */
+  private probeInBackground(): void {
+    this.licenseOperations
+      .probeLicenseServerIfDue()
+      .then((result) => {
+        if (result !== null) {
+          this.trialWarningOperations.checkAndNotify();
+        }
+      })
+      .catch((e) => {
+        log(`[LicenseStateHandler] License server probe failed: ${e}`);
+      });
   }
 
   /**
