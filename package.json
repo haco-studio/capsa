@@ -20,7 +20,7 @@
     "url": "git+https://github.com/haco-studio/capsa.git"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.6",
+    "@biomejs/biome": "^2.6.7",
     "typescript": "^7.0.2",
     "vitest": "^4.0.14"
   }
