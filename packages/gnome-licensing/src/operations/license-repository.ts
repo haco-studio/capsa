@@ -50,9 +50,9 @@ export interface LicenseRepository {
   setLastOnlineAt(date: Date): void;
 
   /**
-   * Get the result of the last time the license server was asked, after the
-   * Trial Period ended, whether it is there. Returns 'none' when it has not
-   * been asked (or the stored value is not usable).
+   * Get the result of the most recent time the license server was asked,
+   * near or after the end of the Trial Period, whether it is there. Returns
+   * 'none' when it has not been asked (or the stored value is not usable).
    */
   getTrialProbeResult(): TrialProbeResult;
 
@@ -60,6 +60,17 @@ export interface LicenseRepository {
    * Store the result of asking the license server whether it is there.
    */
   setTrialProbeResult(result: TrialProbeResult): void;
+
+  /**
+   * Get when the license server was most recently asked whether it is there.
+   * Returns null when it has not been asked (or the stored value is not usable).
+   */
+  getTrialProbedAt(): Date | null;
+
+  /**
+   * Store when the license server was most recently asked whether it is there.
+   */
+  setTrialProbedAt(date: Date): void;
 
   /**
    * Get the current license status

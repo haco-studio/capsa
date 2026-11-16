@@ -32,21 +32,29 @@ describe('TrialPeriod', () => {
     });
   });
 
-  describe('isExpired', () => {
-    it('returns false when not expired', () => {
+  describe('hasEnded', () => {
+    it('returns false while days are left', () => {
       const period = new TrialPeriod({
         daysUsed: new TrialDays(29),
         lastUsedDate: '2026-01-15',
       });
-      expect(period.isExpired()).toBe(false);
+      expect(period.hasEnded('2026-01-16')).toBe(false);
     });
 
-    it('returns true when expired', () => {
+    it('returns false on the day the last day was counted', () => {
       const period = new TrialPeriod({
         daysUsed: new TrialDays(30),
         lastUsedDate: '2026-01-15',
       });
-      expect(period.isExpired()).toBe(true);
+      expect(period.hasEnded('2026-01-15')).toBe(false);
+    });
+
+    it('returns true on a later day once every day has been counted', () => {
+      const period = new TrialPeriod({
+        daysUsed: new TrialDays(30),
+        lastUsedDate: '2026-01-15',
+      });
+      expect(period.hasEnded('2026-01-16')).toBe(true);
     });
   });
 
@@ -67,7 +75,7 @@ describe('TrialPeriod', () => {
       expect(period.canRecordUsage('2026-01-15')).toBe(false);
     });
 
-    it('returns false if expired', () => {
+    it('returns false once every day has been counted', () => {
       const period = new TrialPeriod({
         daysUsed: new TrialDays(30),
         lastUsedDate: '2026-01-14',

@@ -32,6 +32,14 @@ describe('getLicenseStatusDisplay', () => {
     });
   });
 
+  it('shows the last day of the trial, which is still usable, when no days are left', () => {
+    expect(getLicenseStatusDisplay(state({ status: 'trial', trialDaysRemaining: 0 }))).toEqual({
+      title: 'Trial',
+      subtitle: 'Last day of use',
+      showPurchaseLink: true,
+    });
+  });
+
   it('shows the remaining trial days while offline', () => {
     expect(getLicenseStatusDisplay(state({ status: 'trial', networkState: 'offline' }))).toEqual({
       title: 'Trial',

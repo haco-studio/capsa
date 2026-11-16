@@ -42,7 +42,11 @@ export class TrialDays {
     return Math.max(0, MAX_DAYS - this.value);
   }
 
-  isExpired(): boolean {
+  /**
+   * Whether every day of the trial has been counted. The last counted day is
+   * still usable; the trial ends with the first use on a later day.
+   */
+  isExhausted(): boolean {
     return this.value >= MAX_DAYS;
   }
 

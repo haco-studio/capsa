@@ -1,6 +1,6 @@
 {
   "name": "@haco-studio/gnome-licensing",
-  "version": "0.1.0-next.0",
+  "version": "0.1.0-next.1",
   "description": "License gate client for GNOME Shell extensions",
   "license": "GPL-3.0-or-later",
   "author": "x7c1",

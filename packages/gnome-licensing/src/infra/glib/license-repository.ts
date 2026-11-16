@@ -22,7 +22,10 @@ declare function log(message: string): void;
  * whether the extension is enabled. `last-online-at` is excluded too: the Shell
  * writes it often, and following it would only produce redundant
  * notifications. `trial-probe-result` is excluded because only the Shell
- * writes it, and the Shell notifies the state change itself after writing it.
+ * writes it, and the Shell notifies the state change itself after writing it
+ * when the result changes whether the extension is enabled.
+ * `trial-probed-at` is excluded for the same reason, and because it only
+ * decides when the next probe is made, never whether the extension is enabled.
  */
 const LICENSE_STATE_KEYS = [
   'license-status',
@@ -118,6 +121,18 @@ export class GSettingsLicenseRepository implements LicenseRepository {
 
   setTrialProbeResult(result: TrialProbeResult): void {
     this.settings.set_string('trial-probe-result', result);
+  }
+
+  getTrialProbedAt(): Date | null {
+    const seconds = this.settings.get_int64('trial-probed-at');
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return null;
+    }
+    return new Date(seconds * 1000);
+  }
+
+  setTrialProbedAt(date: Date): void {
+    this.settings.set_int64('trial-probed-at', Math.floor(date.getTime() / 1000));
   }
 
   getStatus(): LicenseStatus {
