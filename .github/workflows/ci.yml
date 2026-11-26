@@ -6,6 +6,12 @@ on:
       - '**'
   pull_request:
 
+# 同じ PR に push し直したら、走っている古い実行を取り消す。main への push は実行ごとに別のグループにして、
+# 取り消しも待ちもさせない（同じグループで待てる実行は 1 つだけで、続けて push すると間の実行が捨てられる）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
